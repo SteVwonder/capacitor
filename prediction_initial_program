@@ -47,8 +47,8 @@ def load_sched_module(args):
 
     if args.rdl:
         load_cmd.append("rdl-conf={}".format(args.rdl))
-    if args.results and False:
-        load_cmd.append("resultsfolder={}".format(args.results))
+    if args.results:
+        load_cmd.append("results-dir={}".format(args.results))
     if args.sched_plugin:
         load_cmd.append("plugin={}".format(args.sched_plugin))
 
@@ -312,7 +312,7 @@ class SimInterface(cap.UserInterface):
     '''
 
     fieldnames = ['id', 'nnodes', 'ntasks', 'starting_time', 'complete_time',
-                  'walltime', 'is_hierarchical']
+                  'walltime', 'submit_time']
 
     def __init__(self, flux_handle, outstream):
         print "Initializing SimInterface"
@@ -358,6 +358,12 @@ class SimInterface(cap.UserInterface):
                     pass
             rowdict['id'] = job_id
             self.writer.writerow(rowdict)
+            print "Deleting {} from kvs".format(jobdir_key)
+            kvs.unlink(self.fh, jobdir_key)
+            job_active_dir_key = 'lwj-active.{}'.format(job_id)
+            print "Deleting {} from kvs".format(job_active_dir_key)
+            kvs.unlink(self.fh, job_active_dir_key)
+            kvs.commit(self.fh)
 
 class Tee(object):
     '''

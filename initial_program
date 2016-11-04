@@ -346,6 +346,9 @@ class SimInterface(cap.UserInterface):
                     pass
             rowdict['id'] = job.job_id
             self.writer.writerow(rowdict)
+            print "Deleting {} from kvs".format(jobdir_key)
+            kvs.unlink(job.kvs.fh, jobdir_key)
+            kvs.commit(job.kvs.fh)
 
 class Tee(object):
     '''
