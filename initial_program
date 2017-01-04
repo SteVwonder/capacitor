@@ -54,6 +54,8 @@ def load_sched_module(args):
         load_cmd.append("resultsfolder={}".format(args.results))
     if args.sched_plugin:
         load_cmd.append("plugin={}".format(args.sched_plugin))
+    if args.verbose:
+        load_cmd.append('verbosity={}'.format(1))
 
     print "Loading sched module: {}".format(load_cmd)
     output = subprocess.check_output(load_cmd)
@@ -485,6 +487,7 @@ def parse_command_line():
     arg_parser.add_argument('--redirect_script', help="path to the bash script to redirect stdout/stderr")
     arg_parser.add_argument('--simulation', action='store_true',
                             help='whether or not to run under the Flux simulator')
+    arg_parser.add_argument('--verbose', '-v', action='store_true')
 
     subparsers = arg_parser.add_subparsers()
 
