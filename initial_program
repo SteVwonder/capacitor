@@ -42,9 +42,9 @@ def load_sched_module(args):
     ''' Load the sched module into the enclosing flux instance '''
 
     load_cmd = ['flux', 'module', 'load', 'sched',
-                'in-sim=true',
+                'in-sim={}'.format(args.simulation),
                 'jobid={}'.format(args.local_jobid)]
-    if not args.root:
+    if not args.root and args.simulation:
         load_cmd.append('sim_uri={}'.format(args.sim_uri))
     if not args.root and args.prefix:
         load_cmd.append('prefix={}'.format(args.prefix))
@@ -102,11 +102,12 @@ def load_timer_module(args):
 def load_modules(args):
     ''' Loads all of the necessary modules into the enclosing flux instance '''
 
-    if args.root:
-        load_sim_module()
+    if args.simulation:
+        load_timer_module(args)
+        load_exec_module(args)
+        if args.root:
+            load_sim_module()
     load_sched_module(args)
-    load_timer_module(args)
-    load_exec_module(args)
 
 def print_flux_info():
     ''' Loads the sim module into the enclosing flux instance '''
@@ -143,10 +144,14 @@ def job_generator(args):
                     cmd.extend(['-o', args.results])
                 if args.sched_plugin:
                     cmd.extend(['--sched_plugin', args.sched_plugin])
+                if args.simulation:
+                    cmd.append('--simulation')
                 if args.redirect_script:
                     log_path = os.path.join(args.log_dir, "stdout_err-{}".format(args.full_jobid))
                     cmd = [args.redirect_script, log_path] + cmd + ['--redirect_script', args.redirect_script]
-                cmd.extend(['child', args.sim_uri, str(args.full_jobid)])
+                cmd.extend(['child', str(args.full_jobid)])
+                if args.simulation:
+                    cmd.extend(['--sim_uri', args.sim_uri])
             else:
                 cmd = ['sleep', str(runtime)]
             env = cap.get_environment()
@@ -363,6 +368,65 @@ class SimInterface(cap.UserInterface):
             rowdict['id'] = job.job_id
             self.writer.writerow(rowdict)
 
+class RegularInterface(cap.UserInterface):
+    '''
+    Interact with the flux scheduler when its running regularly
+    Log job information upon completion
+    '''
+
+    fieldnames = ['id', 'nnodes', 'ntasks', 'starting-time', 'complete-time',
+                  'walltime', 'is_hierarchical']
+
+    def __init__(self, outstream):
+        print "Initializing RegularInterface"
+        self.writer_stream = outstream
+        self.writer = csv.DictWriter(outstream, self.fieldnames)
+        self.writer.writeheader()
+        self.stream = sys.stdout
+
+    def submitted(self, job):
+        '''
+        Runs after a job is submitted but before it is scheduled
+        Inserts sim-specific information into the KVS
+        '''
+        print "adding job {}".format(job.kvs['cmdline'])
+        job.kvs['execution_time'] = job.spec['runtime']
+        job.kvs['walltime'] = job.spec['walltime']
+        job.kvs['is_hierarchical'] = job.spec['is_hierarchical']
+        # TODO: interface with the JSC so that state_changed can be called properly
+        job.kvs.commit()
+
+    def state_changed(self, job, state):
+        '''
+        Runs after a job changes state
+        When a job completes, write out relavant job info to a file
+        '''
+        def try_key_exists(fh, key):
+            key_exists = kvs.exists(fh, key)
+            return key_exists
+
+        def try_get_dir(fh, key):
+            kvs_dir = kvs.get_dir(fh, key)
+            return kvs_dir
+
+        if state == 'complete':
+            jobdir_key = 'lwj.{}'.format(job.job_id)
+            complete_key = '{}.complete-time'.format(jobdir_key)
+            print "Looking for kvs entry {}, since job {} completed".format(complete_key, job.job_id)
+            while not try_key_exists(job.kvs.fh, complete_key):
+                print "{} kvs entry not found, waiting for it to be created".format(complete_key)
+                time.sleep(1)
+            job.kvs = try_get_dir(job.kvs.fh, jobdir_key)
+            # TODO: figure out why listing a kvsdir is not returning everything
+            rowdict = {}
+            for key in self.fieldnames:
+                try:
+                    rowdict[key] = job.kvs[key]
+                except KeyError:
+                    pass
+            rowdict['id'] = job.job_id
+            self.writer.writerow(rowdict)
+
 class Tee(object):
     '''
     Allows for printing to a file and flux's dmesg buffer simultaneously
@@ -419,6 +483,8 @@ def parse_command_line():
     arg_parser.add_argument('--log_dir', help="log stdout to a file (arg = directory)")
     arg_parser.add_argument('--sched_plugin', help="which sched plugin to use")
     arg_parser.add_argument('--redirect_script', help="path to the bash script to redirect stdout/stderr")
+    arg_parser.add_argument('--simulation', action='store_true',
+                            help='whether or not to run under the Flux simulator')
 
     subparsers = arg_parser.add_subparsers()
 
@@ -430,18 +496,19 @@ def parse_command_line():
 
     sim_parser = subparsers.add_parser('child')
     sim_parser.set_defaults(child=True, root=False)
-    sim_parser.add_argument('sim_uri',
-                            help="uri of the master sim module")
     sim_parser.add_argument('prefix',
-                            help="sim name prefix, not including the id of "
+                            help="name prefix, not including the id of "
                             "this job (e.g. 4.2.5)")
+    sim_parser.add_argument('--sim_uri',
+                            help="uri of the master sim module")
 
     args = arg_parser.parse_args()
 
     if args.root:
         args.local_jobid = 0
         args.full_jobid = 0
-        args.sim_uri = os.environ['FLUX_URI']
+        if args.simulation:
+            args.sim_uri = os.environ['FLUX_URI']
     else:
         args.local_jobid = int(os.environ['FLUX_JOB_ID'])
         args.full_jobid = "{}.{}".format(args.prefix, args.local_jobid)
@@ -456,6 +523,8 @@ def parse_command_line():
     if args.child and args.prefix:
         for prefix_id in args.prefix.split('.'):
             assert prefix_id.isdigit()
+    if args.simulation:
+        assert args.sim_uri is not None
 
     return args
 
@@ -472,8 +541,9 @@ def main():
     if args.child:
         parent_uri = local_handle.flux_attr_get("parent-uri", None)
         parent_handle = flux.Flux(url=parent_uri)
-        sim_handle = flux.Flux(url=args.sim_uri)
-    else:
+        if args.simulation:
+            sim_handle = flux.Flux(url=args.sim_uri)
+    elif args.simulation:
         sim_handle = local_handle
 
     setup_logging(args, local_handle)
@@ -493,7 +563,10 @@ def main():
 
     outfilename = os.path.join(args.results, "job-{}".format(args.full_jobid))
     with open(outfilename, 'wb', 0) as outfile:
-        interface = SimInterface(outfile)
+        if args.simulation:
+            interface = SimInterface(outfile)
+        else:
+            interface = RegularInterface(outfile)
         #sched = SimScheduler(flux_handle=local_handle, interface=interface)
         sched = SimScheduler(flux_handle=None, interface=interface)
 
@@ -518,29 +591,32 @@ def main():
         job_stream.join()
         time.sleep(1)
 
-        sched_rpc_req = send_jobssubmitted_msg(num_jobs)
-        join_sim(args)
+        if args.simulation:
+            sched_rpc_req = send_jobssubmitted_msg(num_jobs)
+            join_sim(args)
 
-        if args.root:
-            print "Starting simulation"
-            start_sim()
-        else: # is a child
-            send_childbirth_msg(args)
+        if args.simulation:
+            if args.root:
+                print "Starting simulation"
+                start_sim()
+            else: # is a child
+                send_childbirth_msg(args)
 
-        trigger_topic = "init_prog.{}.trigger".format(args.full_jobid)
-        print "Registering watcher for '{}' requests".format(trigger_topic)
-        local_handle.event_subscribe(trigger_topic)
-        with local_handle.msg_watcher_create(trigger_cb,
-                                             type_mask=flux.FLUX_MSGTYPE_EVENT,
-                                             topic_glob=trigger_topic,
-                                             args=args) as msg_watch:
-            print "Entering reactor"
-            if local_handle.reactor_run(local_handle.get_reactor(), 0) < 0:
-                print "reactor start failed"
-                local_handle.fatal_error("init_prog.main", "reactor start failed!")
+            trigger_topic = "init_prog.{}.trigger".format(args.full_jobid)
+            print "Registering watcher for '{}' requests".format(trigger_topic)
+            local_handle.event_subscribe(trigger_topic)
+            with local_handle.msg_watcher_create(trigger_cb,
+                                                 type_mask=flux.FLUX_MSGTYPE_EVENT,
+                                                 topic_glob=trigger_topic,
+                                                 args=args) as msg_watch:
+                print "Entering reactor"
+                if local_handle.reactor_run(local_handle.get_reactor(), 0) < 0:
+                    print "reactor start failed"
+                    local_handle.fatal_error("init_prog.main", "reactor start failed!")
+                print "Exited reactor"
 
-        print "Exited reactor"
         # Wait for all of the processes to finish
+        print "Waiting for sched_proc to finish"
         sched_proc.join()
         print "Sending DONE to reactor proc via reactor stream"
         reactor_stream.put("DONE")
