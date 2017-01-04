@@ -108,6 +108,22 @@ def load_modules(args):
     load_timer_module(args)
     load_exec_module(args)
 
+def print_flux_info():
+    ''' Loads the sim module into the enclosing flux instance '''
+
+    cmd = ['flux', 'getattr', 'rank']
+    output = subprocess.check_output(cmd)
+    if len(output) > 0:
+        print "Flux rank: {}".format(output)
+    cmd = ['flux', 'getattr', 'size']
+    output = subprocess.check_output(cmd)
+    if len(output) > 0:
+        print "Flux size: {}".format(output)
+    cmd = ['flux', 'module', 'list', '--rank=all']
+    output = subprocess.check_output(cmd)
+    if len(output) > 0:
+        print "Flux module info: {}".format(output)
+
 def job_generator(args):
     ''' Reads jobs in from hfile and yields them '''
 
@@ -461,6 +477,8 @@ def main():
         sim_handle = local_handle
 
     setup_logging(args, local_handle)
+
+    print_flux_info()
 
     print "Loading modules"
     load_modules(args)
