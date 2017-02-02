@@ -136,6 +136,8 @@ def job_generator(args):
     with open(args.hfile, 'r') as infile:
         reader = csv.DictReader(infile)
         for line in reader:
+            if '#' in line['JobID']:
+                continue
             timelimit = int(line['Timelimit'])
             elapsed = int(line['Elapsed'])
             runtime = min(timelimit, elapsed)
