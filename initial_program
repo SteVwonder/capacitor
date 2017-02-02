@@ -153,6 +153,8 @@ def job_generator(args):
                     cmd.extend(['--sched_plugin', args.sched_plugin])
                 if args.simulation:
                     cmd.append('--simulation')
+                if args.verbose:
+                    cmd.append('--verbose')
                 if args.redirect_script:
                     log_path = os.path.join(args.log_dir, "stdout_err-{}".format(args.full_jobid))
                     cmd = [args.redirect_script, log_path] + cmd + ['--redirect_script', args.redirect_script]
