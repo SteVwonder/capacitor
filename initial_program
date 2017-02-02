@@ -19,6 +19,7 @@ import argparse
 import subprocess
 import multiprocessing as mp
 
+import psutil
 import flux
 import flux.kvs as kvs
 from flux._core import ffi
@@ -124,6 +125,8 @@ def print_flux_info():
     output = subprocess.check_output(cmd)
     if len(output) > 0:
         print "Flux module info: {}".format(output)
+    p = psutil.Process()
+    print "Flux broker CPU affinity: {}".format(p.cpu_affinity())
 
 def print_lwj_kvs(fh):
     lwjs = kvs.get_dir(fh, 'lwj')
@@ -162,7 +165,11 @@ def job_generator(args):
                 if args.simulation:
                     cmd.extend(['--sim_uri', args.sim_uri])
             else:
-                cmd = ['sleep', str(runtime)]
+                if args.alternate_cmd:
+                    cmd = [args.alternate_cmd, str(runtime),
+                           os.path.join(args.log_dir, "{}".format(args.full_jobid))]
+                else:
+                    cmd = ["sleep", str(runtime)]
             env = cap.get_environment()
             env['FLUX_MODULE_PATH'] = os.environ['FLUX_MODULE_PATH']
             env['FLUX_SCHED_RC_NOOP'] = os.environ['FLUX_SCHED_RC_NOOP']
@@ -492,6 +499,8 @@ def parse_command_line():
     arg_parser.add_argument('--log_dir', help="log stdout to a file (arg = directory)")
     arg_parser.add_argument('--sched_plugin', help="which sched plugin to use")
     arg_parser.add_argument('--redirect_script', help="path to the bash script to redirect stdout/stderr")
+    arg_parser.add_argument('--alternate-cmd', help="alternate command to run instead of sleep, "\
+                            "runtime will be passed as the only argument")
     arg_parser.add_argument('--simulation', action='store_true',
                             help='whether or not to run under the Flux simulator')
     arg_parser.add_argument('--verbose', '-v', action='store_true')
