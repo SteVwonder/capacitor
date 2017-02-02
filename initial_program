@@ -114,18 +114,21 @@ def load_modules(args):
 def print_flux_info():
     ''' Loads the sim module into the enclosing flux instance '''
 
-    cmd = ['flux', 'getattr', 'rank']
-    output = subprocess.check_output(cmd)
-    if len(output) > 0:
-        print "Flux rank: {}".format(output)
-    cmd = ['flux', 'getattr', 'size']
-    output = subprocess.check_output(cmd)
-    if len(output) > 0:
-        print "Flux size: {}".format(output)
+    getattrs = ['local-uri', 'rank', 'size']
+    for attr in getattrs:
+        cmd = ['flux', 'getattr', attr]
+        output = subprocess.check_output(cmd)
+        if len(output) > 0:
+            print "Flux {}: {}".format(attr, output)
     cmd = ['flux', 'module', 'list', '--rank=all']
     output = subprocess.check_output(cmd)
     if len(output) > 0:
         print "Flux module info: {}".format(output)
+
+def print_lwj_kvs(fh):
+    lwjs = kvs.get_dir(fh, 'lwj')
+    for lwj in lwjs:
+        print lwj
 
 def job_generator(args):
     ''' Reads jobs in from hfile and yields them '''
@@ -624,6 +627,8 @@ def main():
         print "Sending DONE to reactor proc via reactor stream"
         reactor_stream.put("DONE")
         reactor_proc.join()
+
+        print_lwj_kvs(local_handle)
 
     # TODO: send death msg if child
     if args.xterm:
