@@ -174,7 +174,8 @@ def job_generator(args):
                     cmd = ["sleep", str(runtime)]
             env = cap.get_environment()
             env['FLUX_MODULE_PATH'] = os.environ['FLUX_MODULE_PATH']
-            env['FLUX_SCHED_RC_NOOP'] = os.environ['FLUX_SCHED_RC_NOOP']
+            if 'FLUX_SCHED_RC_NOOP' in os.environ:
+                env['FLUX_SCHED_RC_NOOP'] = os.environ['FLUX_SCHED_RC_NOOP']
             new_job = cap.Job(cmd, nnodes=int(line['NNodes']),
                               ntasks=int(line['NCPUS']),
                               runtime=runtime, walltime=timelimit,
